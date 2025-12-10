@@ -282,7 +282,10 @@ router.post('/paytr/callback', async (req, res) => {
   try {
     const callback = req.body;
 
-    // Verify hash: bazı callback'lerde "id" alanı gelmeyebiliyor, bu yüzden iki formülle doğrula.
+    // DEBUG: callback gövdesini logla (hata ayıklama için)
+    console.log('🔔 PayTR callback payload:', callback);
+
+    // Verify hash: bazı callback'lerde "id" alanı gelmeyebiliyor, bazı durumlarda payment_amount dönebiliyor.
     const possibleTokens = [
       String(callback.id || '') +
         String(callback.merchant_oid || '') +
@@ -293,20 +296,34 @@ router.post('/paytr/callback', async (req, res) => {
       String(callback.merchant_oid || '') +
         PAYTR_MERCHANT_SALT +
         String(callback.status || '') +
-        String(callback.total_amount || '')
+        String(callback.total_amount || ''),
+      // alternatif: payment_amount kullanırsa (taksit/vade farkı yoksa)
+      String(callback.id || '') +
+        String(callback.merchant_oid || '') +
+        PAYTR_MERCHANT_SALT +
+        String(callback.status || '') +
+        String(callback.payment_amount || ''),
+      String(callback.merchant_oid || '') +
+        PAYTR_MERCHANT_SALT +
+        String(callback.status || '') +
+        String(callback.payment_amount || '')
     ];
 
-    const match = possibleTokens.some((t) => {
-      const h = crypto.createHmac('sha256', PAYTR_MERCHANT_KEY).update(t).digest('base64');
-      return h === callback.hash;
-    });
+    const candidateHashes = possibleTokens.map((t) =>
+      crypto.createHmac('sha256', PAYTR_MERCHANT_KEY).update(t).digest('base64')
+    );
+
+    const match = candidateHashes.some((h) => h === callback.hash);
 
     if (!match) {
       console.error('PayTR callback hash doğrulama hatası', {
         id: callback.id,
         merchant_oid: callback.merchant_oid,
         status: callback.status,
-        total_amount: callback.total_amount
+        total_amount: callback.total_amount,
+        payment_amount: callback.payment_amount,
+        candidate_hashes: candidateHashes,
+        incoming_hash: callback.hash
       });
       return res.status(400).send('INVALID_HASH');
     }
