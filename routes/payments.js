@@ -199,7 +199,7 @@ router.post('/paytr/create', authenticateToken, async (req, res) => {
 
     // callback_link gönderiliyorsa callback_id zorunlu. Alfanumerik olmalı (PayTR şartı).
     const sanitize = (val) => val.replace(/[^a-zA-Z0-9]/g, '');
-    const callback_id = callbackLink ? `${sanitize(userId)}_${Date.now()}` : '';
+    const callback_id = callbackLink ? sanitize(`${userId}${Date.now()}`) : '';
     const successReturnUrl = buildSuccessReturnUrl();
 
     // Required fields for token generation
