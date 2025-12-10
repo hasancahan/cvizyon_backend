@@ -285,45 +285,26 @@ router.post('/paytr/callback', async (req, res) => {
     // DEBUG: callback gövdesini logla (hata ayıklama için)
     console.log('🔔 PayTR callback payload:', callback);
 
-    // Verify hash: bazı callback'lerde "id" alanı gelmeyebiliyor, bazı durumlarda payment_amount dönebiliyor.
-    const possibleTokens = [
-      String(callback.id || '') +
-        String(callback.merchant_oid || '') +
-        PAYTR_MERCHANT_SALT +
-        String(callback.status || '') +
-        String(callback.total_amount || ''),
-      // yedek formül: id gelmezse
-      String(callback.merchant_oid || '') +
-        PAYTR_MERCHANT_SALT +
-        String(callback.status || '') +
-        String(callback.total_amount || ''),
-      // alternatif: payment_amount kullanırsa (taksit/vade farkı yoksa)
-      String(callback.id || '') +
-        String(callback.merchant_oid || '') +
-        PAYTR_MERCHANT_SALT +
-        String(callback.status || '') +
-        String(callback.payment_amount || ''),
-      String(callback.merchant_oid || '') +
-        PAYTR_MERCHANT_SALT +
-        String(callback.status || '') +
-        String(callback.payment_amount || '')
-    ];
+    // PayTR Link API resmi formül: id + merchant_oid + merchant_salt + status + total_amount
+    const idPart = String(callback.id ?? '');
+    const oidPart = String(callback.merchant_oid ?? '');
+    const statusPart = String(callback.status ?? '');
+    const totalPart = String(callback.total_amount ?? '');
 
-    const candidateHashes = possibleTokens.map((t) =>
-      crypto.createHmac('sha256', PAYTR_MERCHANT_KEY).update(t).digest('base64')
-    );
+    const token = idPart + oidPart + PAYTR_MERCHANT_SALT + statusPart + totalPart;
+    const computedHash = crypto.createHmac('sha256', PAYTR_MERCHANT_KEY).update(token).digest('base64');
 
-    const match = candidateHashes.some((h) => h === callback.hash);
-
-    if (!match) {
+    if (computedHash !== callback.hash) {
       console.error('PayTR callback hash doğrulama hatası', {
         id: callback.id,
         merchant_oid: callback.merchant_oid,
         status: callback.status,
         total_amount: callback.total_amount,
         payment_amount: callback.payment_amount,
-        candidate_hashes: candidateHashes,
-        incoming_hash: callback.hash
+        merchant_id: callback.merchant_id,
+        computed_hash: computedHash,
+        incoming_hash: callback.hash,
+        token_used: token
       });
       return res.status(400).send('INVALID_HASH');
     }
