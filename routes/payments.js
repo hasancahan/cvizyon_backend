@@ -64,6 +64,9 @@ const sendPaymentEmail = async ({ to, planName, amount }) => {
   await transporter.sendMail(mailOptions);
 };
 
+// Avoid duplicate success logs per merchant_oid (in-memory)
+const loggedSuccessOids = new Set();
+
 // Save payment record
 router.post('/', authenticateToken, async (req, res) => {
   try {
@@ -185,7 +188,8 @@ router.post('/paytr/create', authenticateToken, async (req, res) => {
     const name = plan.name;
     const price = totalAmount.toString();
     const currency = 'TL';
-    const max_installment = '12';
+    // Taksitsiz satış için max_installment=1
+    const max_installment = '1';
     const link_type = 'product';
     const lang = 'tr';
     const min_count = '1';
@@ -333,7 +337,7 @@ router.post(
         return res.status(400).send('INVALID_CALLBACK_ID_FORMAT');
       }
 
-      const userId = userIdPart;
+      const userId = userIdPart; // sanitized (non-hyphen) id part
 
       if (status === 'success') {
         const [payments] = await pool.execute(
@@ -358,13 +362,13 @@ router.post(
 
         if (payment.plan_type === 'pro') {
           await pool.execute(
-            'UPDATE users SET is_premium = TRUE WHERE id = ?',
-            [userId]
+            'UPDATE users SET is_premium = TRUE WHERE id = ? OR REPLACE(id, "-", "") = ?',
+            [userId, userId]
           );
 
           const [users] = await pool.execute(
-            'SELECT ip_address, email, name FROM users WHERE id = ?',
-            [userId]
+            'SELECT ip_address, email, name FROM users WHERE id = ? OR REPLACE(id, "-", "") = ?',
+            [userId, userId]
           );
 
           const userIp = users[0]?.ip_address;
@@ -381,8 +385,8 @@ router.post(
           console.log('✅ Kullanıcı premium olarak güncellendi:', userId);
         } else {
           const [users] = await pool.execute(
-            'SELECT email, name FROM users WHERE id = ?',
-            [userId]
+            'SELECT email, name FROM users WHERE id = ? OR REPLACE(id, "-", "") = ?',
+            [userId, userId]
           );
           userEmailForReceipt = users[0]?.email || null;
           userNameForReceipt = users[0]?.name || null;
@@ -406,12 +410,15 @@ router.post(
           }
         }
 
-        console.log('✅ PayTR ödeme başarılı:', {
-          merchant_oid: oid,
-          total_amount: total,
-          user_id: userId,
-          plan_type: payment.plan_type
-        });
+        if (!loggedSuccessOids.has(oid)) {
+          loggedSuccessOids.add(oid);
+          console.log('✅ PayTR ödeme başarılı:', {
+            merchant_oid: oid,
+            total_amount: total,
+            user_id: userId,
+            plan_type: payment.plan_type
+          });
+        }
 
         res.send('OK');
       } else {
