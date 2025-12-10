@@ -289,14 +289,13 @@ router.post('/paytr/callback', async (req, res) => {
     // DEBUG: callback gövdesini logla (hata ayıklama için)
     console.log('🔔 PayTR callback payload:', callback);
 
-    // PayTR Link API resmi formül: id + merchant_oid + merchant_salt + status + total_amount
-    const idPart = String(callback.id ?? '');
+    // PayTR Link API formülü (dokümana göre):
+    // hash_str = merchant_oid + merchant_salt + status + total_amount
     const oidPart = String(callback.merchant_oid ?? '');
     const statusPart = String(callback.status ?? '');
     const totalPart = String(callback.total_amount ?? '');
-
-    const token = idPart + oidPart + PAYTR_MERCHANT_SALT + statusPart + totalPart;
-    const computedHash = crypto.createHmac('sha256', PAYTR_MERCHANT_KEY).update(token).digest('base64');
+    const hashStr = oidPart + PAYTR_MERCHANT_SALT + statusPart + totalPart;
+    const computedHash = crypto.createHmac('sha256', PAYTR_MERCHANT_KEY).update(hashStr).digest('base64');
 
     if (computedHash !== callback.hash) {
       console.error('PayTR callback hash doğrulama hatası', {
@@ -306,9 +305,12 @@ router.post('/paytr/callback', async (req, res) => {
         total_amount: callback.total_amount,
         payment_amount: callback.payment_amount,
         merchant_id: callback.merchant_id,
+        callback_id: callback.callback_id,
         computed_hash: computedHash,
         incoming_hash: callback.hash,
-        token_used: token
+        hash_str: hashStr,
+        key_length: PAYTR_MERCHANT_KEY?.length || 0,
+        salt_length: PAYTR_MERCHANT_SALT?.length || 0
       });
       return res.status(400).send('INVALID_HASH');
     }
