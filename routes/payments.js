@@ -282,15 +282,25 @@ router.post('/paytr/callback', async (req, res) => {
   try {
     const callback = req.body;
 
-    // Verify hash
-    const token = callback.id + callback.merchant_oid + PAYTR_MERCHANT_SALT + callback.status + callback.total_amount;
+    // Verify hash (use empty string fallback to avoid "undefined" in concat)
+    const token =
+      String(callback.id || '') +
+      String(callback.merchant_oid || '') +
+      PAYTR_MERCHANT_SALT +
+      String(callback.status || '') +
+      String(callback.total_amount || '');
     const paytr_token = crypto
       .createHmac('sha256', PAYTR_MERCHANT_KEY)
       .update(token)
       .digest('base64');
 
     if (paytr_token !== callback.hash) {
-      console.error('PayTR callback hash doğrulama hatası');
+      console.error('PayTR callback hash doğrulama hatası', {
+        id: callback.id,
+        merchant_oid: callback.merchant_oid,
+        status: callback.status,
+        total_amount: callback.total_amount
+      });
       return res.status(400).send('INVALID_HASH');
     }
 
