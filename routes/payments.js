@@ -192,8 +192,9 @@ router.post('/paytr/create', authenticateToken, async (req, res) => {
     const callbackLink =
       PAYTR_CALLBACK_URL && !PAYTR_CALLBACK_URL.includes('localhost') ? PAYTR_CALLBACK_URL : '';
 
-    // callback_link gönderiliyorsa callback_id zorunlu. Göndermiyorsak boş bırakıyoruz.
-    const callback_id = callbackLink ? `${userId}_${Date.now()}` : '';
+    // callback_link gönderiliyorsa callback_id zorunlu. Alfanumerik olmalı (PayTR şartı).
+    const sanitize = (val) => val.replace(/[^a-zA-Z0-9]/g, '');
+    const callback_id = callbackLink ? `${sanitize(userId)}${Date.now()}` : '';
     const successReturnUrl = buildSuccessReturnUrl();
 
     // Required fields for token generation
