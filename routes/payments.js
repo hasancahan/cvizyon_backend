@@ -15,6 +15,7 @@ const generateUUID = () => {
 // PayTR credentials (strip surrounding quotes and trim)
 const cleanEnv = (v) =>
   typeof v === 'string' ? v.replace(/^"+|"+$/g, '').replace(/^'+|'+$/g, '').trim() : v;
+const clean = (v) => (v ? String(v).trim() : '');
 const PAYTR_MERCHANT_ID = cleanEnv(process.env.PAYTR_MERCHANT_ID) || '648222';
 const PAYTR_MERCHANT_KEY = cleanEnv(process.env.PAYTR_MERCHANT_KEY) || 'Fz5DzcPGszXGd6mY';
 const PAYTR_MERCHANT_SALT = cleanEnv(process.env.PAYTR_MERCHANT_SALT) || 'UDaAp99Rg8MqheJ4';
@@ -198,7 +199,7 @@ router.post('/paytr/create', authenticateToken, async (req, res) => {
 
     // callback_link gönderiliyorsa callback_id zorunlu. Alfanumerik olmalı (PayTR şartı).
     const sanitize = (val) => val.replace(/[^a-zA-Z0-9]/g, '');
-    const callback_id = callbackLink ? `${sanitize(userId)}${Date.now()}` : '';
+    const callback_id = callbackLink ? `${sanitize(userId)}_${Date.now()}` : '';
     const successReturnUrl = buildSuccessReturnUrl();
 
     // Required fields for token generation
@@ -282,163 +283,154 @@ router.post('/paytr/create', authenticateToken, async (req, res) => {
 });
 
 // PayTR Callback Endpoint (No authentication required - called by PayTR)
-router.post('/paytr/callback', async (req, res) => {
-  try {
-    const callback = req.body;
+router.post(
+  '/paytr/callback',
+  express.urlencoded({ extended: false }),
+  async (req, res) => {
+    try {
+      const merchant_key = PAYTR_MERCHANT_KEY;
+      const merchant_salt = PAYTR_MERCHANT_SALT;
 
-    // DEBUG: callback gövdesini logla (hata ayıklama için)
-    console.log('🔔 PayTR callback payload:', callback);
+      const oid = clean(req.body.merchant_oid);
+      const status = clean(req.body.status);
+      const total = clean(req.body.total_amount);
+      const incoming_hash = clean(req.body.hash);
+      const callback_id = clean(req.body.callback_id);
 
-    // PayTR Link API formülü (dokümana göre):
-    // hash_str = merchant_oid + merchant_salt + status + total_amount
-    const oidPart = String(callback.merchant_oid ?? '');
-    const statusPart = String(callback.status ?? '');
-    const totalPart = String(callback.total_amount ?? '');
-    const hashStr = oidPart + PAYTR_MERCHANT_SALT + statusPart + totalPart;
-    const computedHash = crypto.createHmac('sha256', PAYTR_MERCHANT_KEY).update(hashStr).digest('base64');
+      const hash_str = oid + merchant_salt + status + total;
+      const computed_hash = crypto.createHmac('sha256', merchant_key).update(hash_str).digest('base64');
 
-    if (computedHash !== callback.hash) {
-      console.error('PayTR callback hash doğrulama hatası', {
-        id: callback.id,
-        merchant_oid: callback.merchant_oid,
-        status: callback.status,
-        total_amount: callback.total_amount,
-        payment_amount: callback.payment_amount,
-        merchant_id: callback.merchant_id,
-        callback_id: callback.callback_id,
-        computed_hash: computedHash,
-        incoming_hash: callback.hash,
-        hash_str: hashStr,
-        key_length: PAYTR_MERCHANT_KEY?.length || 0,
-        salt_length: PAYTR_MERCHANT_SALT?.length || 0
+      console.log({
+        merchant_oid: oid,
+        status,
+        total_amount: total,
+        payment_amount: clean(req.body.payment_amount),
+        callback_id,
+        merchant_id: clean(req.body.merchant_id),
+        test_mode: clean(req.body.test_mode),
+        hash_str,
+        computed_hash,
+        incoming_hash
       });
-      return res.status(400).send('INVALID_HASH');
-    }
 
-    // Extract callback_id and user_id
-    const callback_id = callback.callback_id;
-    if (!callback_id) {
-      console.error('PayTR callback_id bulunamadı');
-      return res.status(400).send('INVALID_CALLBACK_ID');
-    }
-
-    // Parse callback_id (format: userId_timestamp)
-    const parts = callback_id.split('_');
-    if (parts.length < 2) {
-      console.error('PayTR callback_id formatı geçersiz:', callback_id);
-      return res.status(400).send('INVALID_CALLBACK_ID_FORMAT');
-    }
-
-    const userId = parts[0];
-
-    if (callback.status === 'success') {
-      // Find pending payment by callback_id
-      const [payments] = await pool.execute(
-        'SELECT id, user_id, plan_type, amount FROM payments WHERE transaction_id = ? AND status = ?',
-        [callback_id, 'pending']
-      );
-
-      if (payments.length === 0) {
-        console.error('PayTR callback için ödeme kaydı bulunamadı:', callback_id);
-        return res.status(404).send('PAYMENT_NOT_FOUND');
+      if (computed_hash !== incoming_hash) {
+        return res.status(400).send('INVALID_HASH');
       }
 
-      const payment = payments[0];
+      if (!callback_id) {
+        console.error('PayTR callback_id bulunamadı');
+        return res.status(400).send('INVALID_CALLBACK_ID');
+      }
 
-      // Update payment status
-      await pool.execute(
-        'UPDATE payments SET status = ?, transaction_id = ? WHERE id = ?',
-        ['completed', callback.merchant_oid, payment.id]
-      );
+      const parts = callback_id.split('_');
+      if (parts.length < 2) {
+        console.error('PayTR callback_id formatı geçersiz:', callback_id);
+        return res.status(400).send('INVALID_CALLBACK_ID_FORMAT');
+      }
 
-      // If pro plan, upgrade user to premium
-      let userEmailForReceipt = null;
-      let userNameForReceipt = null;
+      const userId = parts[0];
 
-      // If pro plan, upgrade user to premium
-      if (payment.plan_type === 'pro') {
+      if (status === 'success') {
+        const [payments] = await pool.execute(
+          'SELECT id, user_id, plan_type, amount FROM payments WHERE transaction_id = ? AND status = ?',
+          [callback_id, 'pending']
+        );
+
+        if (payments.length === 0) {
+          console.error('PayTR callback için ödeme kaydı bulunamadı:', callback_id);
+          return res.status(404).send('PAYMENT_NOT_FOUND');
+        }
+
+        const payment = payments[0];
+
         await pool.execute(
-          'UPDATE users SET is_premium = TRUE WHERE id = ?',
-          [userId]
+          'UPDATE payments SET status = ?, transaction_id = ? WHERE id = ?',
+          ['completed', oid, payment.id]
         );
 
-        // Get user's IP address and remove from free_analyses
-        const [users] = await pool.execute(
-          'SELECT ip_address, email, name FROM users WHERE id = ?',
-          [userId]
-        );
+        let userEmailForReceipt = null;
+        let userNameForReceipt = null;
 
-        const userIp = users[0]?.ip_address;
-        userEmailForReceipt = users[0]?.email || null;
-        userNameForReceipt = users[0]?.name || null;
-
-        if (userIp && userIp !== 'unknown') {
+        if (payment.plan_type === 'pro') {
           await pool.execute(
-            'DELETE FROM free_analyses WHERE ip_address = ?',
-            [userIp]
+            'UPDATE users SET is_premium = TRUE WHERE id = ?',
+            [userId]
+          );
+
+          const [users] = await pool.execute(
+            'SELECT ip_address, email, name FROM users WHERE id = ?',
+            [userId]
+          );
+
+          const userIp = users[0]?.ip_address;
+          userEmailForReceipt = users[0]?.email || null;
+          userNameForReceipt = users[0]?.name || null;
+
+          if (userIp && userIp !== 'unknown') {
+            await pool.execute(
+              'DELETE FROM free_analyses WHERE ip_address = ?',
+              [userIp]
+            );
+          }
+
+          console.log('✅ Kullanıcı premium olarak güncellendi:', userId);
+        } else {
+          const [users] = await pool.execute(
+            'SELECT email, name FROM users WHERE id = ?',
+            [userId]
+          );
+          userEmailForReceipt = users[0]?.email || null;
+          userNameForReceipt = users[0]?.name || null;
+        }
+
+        if (userEmailForReceipt) {
+          const amountTl = parseFloat(payment.amount || 0);
+          const planName =
+            payment.plan_type === 'pro'
+              ? 'CVizyon AI - Profesyonel Plan'
+              : 'CVizyon AI - Danışmanlık Seansı';
+
+          try {
+            await sendPaymentEmail({
+              to: userEmailForReceipt,
+              planName,
+              amount: amountTl
+            });
+          } catch (err) {
+            console.error('E-posta gönderilemedi:', err?.message || err);
+          }
+        }
+
+        console.log('✅ PayTR ödeme başarılı:', {
+          merchant_oid: oid,
+          total_amount: total,
+          user_id: userId,
+          plan_type: payment.plan_type
+        });
+
+        res.send('OK');
+      } else {
+        const [payments] = await pool.execute(
+          'SELECT id FROM payments WHERE transaction_id = ? AND status = ?',
+          [callback_id, 'pending']
+        );
+
+        if (payments.length > 0) {
+          await pool.execute(
+            'UPDATE payments SET status = ? WHERE id = ?',
+            ['failed', payments[0].id]
           );
         }
 
-        console.log('✅ Kullanıcı premium olarak güncellendi:', userId);
-      } else {
-        // Non-pro plan için de e-posta adresi alınsın
-        const [users] = await pool.execute(
-          'SELECT email, name FROM users WHERE id = ?',
-          [userId]
-        );
-        userEmailForReceipt = users[0]?.email || null;
-        userNameForReceipt = users[0]?.name || null;
+        console.log('❌ PayTR ödeme başarısız:', oid);
+        res.send('OK');
       }
-
-      // Send payment receipt email (if SMTP configured)
-      if (userEmailForReceipt) {
-        const amountTl = parseFloat(payment.amount || 0);
-        const planName =
-          payment.plan_type === 'pro'
-            ? 'CVizyon AI - Profesyonel Plan'
-            : 'CVizyon AI - Danışmanlık Seansı';
-
-        try {
-          await sendPaymentEmail({
-            to: userEmailForReceipt,
-            planName,
-            amount: amountTl
-          });
-        } catch (err) {
-          console.error('E-posta gönderilemedi:', err?.message || err);
-        }
-      }
-
-      console.log('✅ PayTR ödeme başarılı:', {
-        merchant_oid: callback.merchant_oid,
-        total_amount: callback.total_amount,
-        user_id: userId,
-        plan_type: payment.plan_type
-      });
-
-      res.send('OK');
-    } else {
-      // Payment failed - update status
-      const [payments] = await pool.execute(
-        'SELECT id FROM payments WHERE transaction_id = ? AND status = ?',
-        [callback_id, 'pending']
-      );
-
-      if (payments.length > 0) {
-        await pool.execute(
-          'UPDATE payments SET status = ? WHERE id = ?',
-          ['failed', payments[0].id]
-        );
-      }
-
-      console.log('❌ PayTR ödeme başarısız:', callback.merchant_oid);
-      res.send('OK');
+    } catch (error) {
+      console.error('PayTR callback error:', error);
+      res.status(500).send('ERROR');
     }
-  } catch (error) {
-    console.error('PayTR callback error:', error);
-    res.status(500).send('ERROR');
   }
-});
+);
 
 export default router;
 
