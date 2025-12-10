@@ -12,13 +12,16 @@ const generateUUID = () => {
   return crypto.randomUUID();
 };
 
-// PayTR credentials
-const PAYTR_MERCHANT_ID = process.env.PAYTR_MERCHANT_ID || '648222';
-const PAYTR_MERCHANT_KEY = process.env.PAYTR_MERCHANT_KEY || 'Fz5DzcPGszXGd6mY';
-const PAYTR_MERCHANT_SALT = process.env.PAYTR_MERCHANT_SALT || 'UDaAp99Rg8MqheJ4';
-const PAYTR_CALLBACK_URL = process.env.PAYTR_CALLBACK_URL || 'https://cvizyonai.com/api/payments/paytr/callback';
-const PAYTR_SUCCESS_URL = process.env.PAYTR_SUCCESS_URL || process.env.FRONTEND_URL || 'http://localhost:3000';
-const PAYTR_FAIL_URL = process.env.PAYTR_FAIL_URL || PAYTR_SUCCESS_URL;
+// PayTR credentials (strip surrounding quotes if platform eklediyse)
+const stripQuotes = (v) => (typeof v === 'string' ? v.replace(/^"+|"+$/g, '').replace(/^'+|'+$/g, '') : v);
+const PAYTR_MERCHANT_ID = stripQuotes(process.env.PAYTR_MERCHANT_ID) || '648222';
+const PAYTR_MERCHANT_KEY = stripQuotes(process.env.PAYTR_MERCHANT_KEY) || 'Fz5DzcPGszXGd6mY';
+const PAYTR_MERCHANT_SALT = stripQuotes(process.env.PAYTR_MERCHANT_SALT) || 'UDaAp99Rg8MqheJ4';
+const PAYTR_CALLBACK_URL =
+  stripQuotes(process.env.PAYTR_CALLBACK_URL) || 'https://cvizyonai.com/api/payments/paytr/callback';
+const PAYTR_SUCCESS_URL =
+  stripQuotes(process.env.PAYTR_SUCCESS_URL) || stripQuotes(process.env.FRONTEND_URL) || 'http://localhost:3000';
+const PAYTR_FAIL_URL = stripQuotes(process.env.PAYTR_FAIL_URL) || PAYTR_SUCCESS_URL;
 
 // Build success return URL with a marker to trigger frontend modal
 const buildSuccessReturnUrl = () => {
