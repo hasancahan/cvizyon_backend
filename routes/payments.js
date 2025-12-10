@@ -12,16 +12,17 @@ const generateUUID = () => {
   return crypto.randomUUID();
 };
 
-// PayTR credentials (strip surrounding quotes if platform eklediyse)
-const stripQuotes = (v) => (typeof v === 'string' ? v.replace(/^"+|"+$/g, '').replace(/^'+|'+$/g, '') : v);
-const PAYTR_MERCHANT_ID = stripQuotes(process.env.PAYTR_MERCHANT_ID) || '648222';
-const PAYTR_MERCHANT_KEY = stripQuotes(process.env.PAYTR_MERCHANT_KEY) || 'Fz5DzcPGszXGd6mY';
-const PAYTR_MERCHANT_SALT = stripQuotes(process.env.PAYTR_MERCHANT_SALT) || 'UDaAp99Rg8MqheJ4';
+// PayTR credentials (strip surrounding quotes and trim)
+const cleanEnv = (v) =>
+  typeof v === 'string' ? v.replace(/^"+|"+$/g, '').replace(/^'+|'+$/g, '').trim() : v;
+const PAYTR_MERCHANT_ID = cleanEnv(process.env.PAYTR_MERCHANT_ID) || '648222';
+const PAYTR_MERCHANT_KEY = cleanEnv(process.env.PAYTR_MERCHANT_KEY) || 'Fz5DzcPGszXGd6mY';
+const PAYTR_MERCHANT_SALT = cleanEnv(process.env.PAYTR_MERCHANT_SALT) || 'UDaAp99Rg8MqheJ4';
 const PAYTR_CALLBACK_URL =
-  stripQuotes(process.env.PAYTR_CALLBACK_URL) || 'https://cvizyonai.com/api/payments/paytr/callback';
+  cleanEnv(process.env.PAYTR_CALLBACK_URL) || 'https://cvizyonai.com/api/payments/paytr/callback';
 const PAYTR_SUCCESS_URL =
-  stripQuotes(process.env.PAYTR_SUCCESS_URL) || stripQuotes(process.env.FRONTEND_URL) || 'http://localhost:3000';
-const PAYTR_FAIL_URL = stripQuotes(process.env.PAYTR_FAIL_URL) || PAYTR_SUCCESS_URL;
+  cleanEnv(process.env.PAYTR_SUCCESS_URL) || cleanEnv(process.env.FRONTEND_URL) || 'http://localhost:3000';
+const PAYTR_FAIL_URL = cleanEnv(process.env.PAYTR_FAIL_URL) || PAYTR_SUCCESS_URL;
 
 // Build success return URL with a marker to trigger frontend modal
 const buildSuccessReturnUrl = () => {
