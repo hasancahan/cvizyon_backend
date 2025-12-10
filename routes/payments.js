@@ -324,13 +324,16 @@ router.post(
         return res.status(400).send('INVALID_CALLBACK_ID');
       }
 
-      const parts = callback_id.split('_');
-      if (parts.length < 2) {
+      // callback_id alfanumerik: userId(part) + timestamp(13 hane)
+      const tsPart = callback_id.slice(-13);
+      const userIdPart = callback_id.slice(0, -13);
+      const tsValid = /^\d{10,13}$/.test(tsPart);
+      if (!userIdPart || !tsValid) {
         console.error('PayTR callback_id formatı geçersiz:', callback_id);
         return res.status(400).send('INVALID_CALLBACK_ID_FORMAT');
       }
 
-      const userId = parts[0];
+      const userId = userIdPart;
 
       if (status === 'success') {
         const [payments] = await pool.execute(
